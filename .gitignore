@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.pi/npm/
+.env
+*.log
+.DS_Store
+web/dist/
