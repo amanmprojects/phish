@@ -8,7 +8,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { fetchFixtures, loadFixture, runDeepAnalyze, runQuickCheck } from "./api";
-import type { FixtureMeta, PhishReport, QuickCheckResult, TimelineItem } from "./types";
+import { buildHighlightRanges, segmentText } from "./highlight";
+import type { FixtureMeta, PhishReport, QuickCheckResult, RedFlag, TimelineItem } from "./types";
 
 function ringColor(label: string) {
   if (label === "Safe") return "var(--safe)";
@@ -193,6 +194,70 @@ function formatFlagType(type: string) {
   return type.replaceAll("_", " ");
 }
 
+/** Grammarly-style immutable email with severity highlights. */
+function HighlightedEmail({
+  text,
+  flags,
+  activeFlagIndex,
+  onFocusFlag,
+}: {
+  text: string;
+  flags: RedFlag[];
+  activeFlagIndex: number | null;
+  onFocusFlag: (index: number | null) => void;
+}) {
+  const ranges = useMemo(() => buildHighlightRanges(text, flags), [text, flags]);
+  const segments = useMemo(
+    () => segmentText(text, ranges, activeFlagIndex),
+    [text, ranges, activeFlagIndex],
+  );
+  const matched = ranges.length;
+
+  return (
+    <div className="email-highlight-wrap">
+      <div
+        className="email-highlight"
+        role="article"
+        aria-label="Analyzed message with risk highlights"
+        aria-readonly="true"
+      >
+        {segments.map((seg, i) => {
+          if (seg.kind === "plain") {
+            return <span key={i}>{seg.text}</span>;
+          }
+          const flag = flags[seg.flagIndex];
+          const title = flag
+            ? `${formatFlagType(flag.type)} · ${flag.severity}${flag.why ? ` — ${flag.why}` : ""}`
+            : "Risk signal";
+          return (
+            <mark
+              key={i}
+              className={`hl hl-${seg.severity}${seg.active ? " hl-active" : ""}`}
+              title={title}
+              data-flag={seg.flagIndex}
+              onMouseEnter={() => onFocusFlag(seg.flagIndex)}
+              onMouseLeave={() => onFocusFlag(null)}
+              onFocus={() => onFocusFlag(seg.flagIndex)}
+              onBlur={() => onFocusFlag(null)}
+              tabIndex={0}
+            >
+              {seg.text}
+            </mark>
+          );
+        })}
+      </div>
+      {matched > 0 && (
+        <div className="hl-legend" aria-hidden>
+          <span className="hl-swatch high" /> High
+          <span className="hl-swatch medium" /> Medium
+          <span className="hl-swatch low" /> Low
+          <span className="hl-legend-hint">Hover a highlight to jump the flag</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function toolLabel(name: string) {
   const n = name.toLowerCase();
   if (n.includes("search")) return "Search";
@@ -200,7 +265,8 @@ function toolLabel(name: string) {
   return formatFlagType(name);
 }
 
-/** Merge tool_end into the matching tool_start so the UI shows one row per call. */
+/** Merge tool_end into the matching tool_start so the UI shows one row per call.
+ *  Failed tools are dropped entirely (not shown). */
 function mergeTimelineItem(prev: TimelineItem[], item: TimelineItem): TimelineItem[] {
   if (item.kind === "tool" && item.status !== "running") {
     let idx = -1;
@@ -218,9 +284,14 @@ function mergeTimelineItem(prev: TimelineItem[], item: TimelineItem): TimelineIt
         }
       }
     }
+    // Failed searches/fetches: remove the in-progress row (or never add) so UI stays clean
+    if (item.status === "error") {
+      if (idx < 0) return prev;
+      return prev.filter((_, i) => i !== idx);
+    }
     if (idx >= 0) {
       const cur = prev[idx];
-      if (cur.kind !== "tool") return [...prev, item];
+      if (cur.kind !== "tool") return prev;
       const next = [...prev];
       next[idx] = {
         ...cur,
@@ -229,12 +300,15 @@ function mergeTimelineItem(prev: TimelineItem[], item: TimelineItem): TimelineIt
       };
       return next;
     }
+    // done without a matching start — skip (no query to show cleanly)
+    return prev;
   }
   // Skip noisy status lines that only clutter the log
   if (item.kind === "status" && (item.phase === "investigating" || item.phase === "starting")) {
-    // keep a single status if empty; otherwise skip duplicates of working state
     if (prev.some((x) => x.kind === "status" && x.phase === item.phase)) return prev;
   }
+  // Never surface generic error timeline rows for tool failures
+  if (item.kind === "error") return prev;
   return [...prev, item];
 }
 
@@ -248,10 +322,13 @@ export default function App() {
   const [busy, setBusy] = useState<"quick" | "deep" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** Flag index focused via email highlight hover (Grammarly-style). */
+  const [focusedFlagIndex, setFocusedFlagIndex] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const reportRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const flagItemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
 
   useEffect(() => {
     fetchFixtures()
@@ -263,6 +340,16 @@ export default function App() {
     setQuick(null);
     setReport(null);
     setTimeline([]);
+    setFocusedFlagIndex(null);
+  }, []);
+
+  const onFocusFlag = useCallback((index: number | null) => {
+    setFocusedFlagIndex(index);
+    if (index == null) return;
+    // Bring matching flag card into view after reorder paint
+    requestAnimationFrame(() => {
+      flagItemRefs.current.get(index)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
   }, []);
 
   const onSelectFixture = useCallback(
@@ -339,6 +426,7 @@ export default function App() {
           onText: undefined,
           onReport: (r) => {
             setReport(r);
+            setFocusedFlagIndex(null);
             requestAnimationFrame(() => {
               reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
             });
@@ -415,6 +503,101 @@ Paste the full email — headers and body.`,
   const hasContent = email.trim().length > 0;
   const investigating = busy === "deep";
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+  const reviewMode = Boolean(report);
+
+  /** Focused red flag rises to the top of the list (Grammarly-style linkage). */
+  const orderedRedFlags = useMemo(() => {
+    if (!report?.red_flags?.length) return [] as Array<{ flag: RedFlag; index: number }>;
+    const items = report.red_flags.map((flag, index) => ({ flag, index }));
+    if (focusedFlagIndex == null) return items;
+    const focused = items.filter((x) => x.index === focusedFlagIndex);
+    const rest = items.filter((x) => x.index !== focusedFlagIndex);
+    return [...focused, ...rest];
+  }, [report, focusedFlagIndex]);
+
+  const investigationCard = (
+    <section className="card dark-card investigation-card">
+      <div className="card-inner">
+        <div className="card-head">
+          <h3 className="card-title">
+            <span className={`icon${investigating ? " live" : ""}`}>
+              <IconRadar />
+            </span>
+            Investigation
+          </h3>
+          <span className="card-hint">
+            {investigating ? (
+              <span className="live-hint">
+                <span className="live-dot" />
+                Live
+              </span>
+            ) : (
+              "Agent · web verify"
+            )}
+          </span>
+        </div>
+
+        {timeline.length === 0 && !investigating ? (
+          <div className="empty-state">
+            <div className="illus">
+              <IconRadar />
+            </div>
+            <p>
+              Deep Investigate launches a research agent that can search the web and explain every red flag.
+            </p>
+          </div>
+        ) : (
+          <ul className="tool-list fade-in">
+            {timeline
+              .filter((item) => item.kind !== "error" && !(item.kind === "tool" && item.status === "error"))
+              .map((item, i) => {
+              if (item.kind === "status") {
+                return (
+                  <li key={`s-${i}`} className="tool-step status" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
+                    <span className="tool-badge">{item.phase}</span>
+                    <span className="tool-query">{item.detail ?? "Working…"}</span>
+                  </li>
+                );
+              }
+              if (item.kind !== "tool") return null;
+              return (
+                <li
+                  key={item.toolCallId ?? `t-${i}`}
+                  className={`tool-step ${item.status}`}
+                  style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+                >
+                  <span className="tool-badge">{toolLabel(item.toolName)}</span>
+                  <span className="tool-query" title={item.query}>
+                    {item.query || "…"}
+                  </span>
+                  <span className={`tool-status ${item.status}`}>
+                    {item.status === "running" ? (
+                      <>
+                        <span className="spinner" />
+                        Running
+                      </>
+                    ) : (
+                      "Done"
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+            {investigating && !timeline.some((t) => t.kind === "tool" && t.status === "running") && (
+              <li className="tool-step running">
+                <span className="tool-badge">Agent</span>
+                <span className="tool-query muted">Analyzing results…</span>
+                <span className="tool-status running">
+                  <span className="spinner" />
+                  Working
+                </span>
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
 
   return (
     <>
@@ -486,91 +669,113 @@ Paste the full email — headers and body.`,
                         <span className="icon">
                           <IconMail />
                         </span>
-                        Message to analyze
+                        {reviewMode ? "Message review" : "Message to analyze"}
                       </h3>
-                      <span className="card-hint">Headers + body · never stored</span>
+                      <span className="card-hint">
+                        {reviewMode ? "Highlighted · read-only" : "Headers + body · never stored"}
+                      </span>
                     </div>
 
-                    <div className="email-shell">
+                    <div className={`email-shell${reviewMode ? " review" : ""}`}>
                       <div className="email-shell-bar">
-                        <span className="meta">Raw email / SMS paste</span>
+                        <span className="meta">
+                          {reviewMode ? "Risk highlights in context" : "Raw email / SMS paste"}
+                        </span>
                         <div className="shell-actions">
                           <span className="char-count">{email.length.toLocaleString()} chars</span>
                           {hasContent && (
-                            <button type="button" className="ghost-btn" onClick={handleClear} title="Clear message">
+                            <button
+                              type="button"
+                              className="ghost-btn"
+                              onClick={handleClear}
+                              title={reviewMode ? "Clear and analyze another" : "Clear message"}
+                            >
                               <IconX />
-                              Clear
+                              {reviewMode ? "New" : "Clear"}
                             </button>
                           )}
                         </div>
                       </div>
-                      <textarea
-                        ref={textareaRef}
-                        className="email-input"
-                        value={email}
-                        onChange={(e) => {
-                          setEmail(e.target.value);
-                          setActiveFixture(null);
-                        }}
-                        onKeyDown={onKeyDown}
-                        placeholder={placeholder}
-                        spellCheck={false}
-                        aria-label="Email or SMS content to analyze"
-                      />
-                    </div>
-
-                    <div className="samples-row">
-                      <div className="samples-label">Try a sample</div>
-                      <div className="samples">
-                        {fixtures.map((f) => (
-                          <button
-                            key={f.id}
-                            type="button"
-                            className={`chip${activeFixture === f.id ? " active" : ""}`}
-                            onClick={() => void onSelectFixture(f.id)}
-                          >
-                            {shortTitle(f.title)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="actions">
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        disabled={!hasContent || busy !== null}
-                        onClick={() => void handleQuick()}
-                      >
-                        {busy === "quick" ? (
-                          <>
-                            <span className="spinner" /> Checking…
-                          </>
-                        ) : (
-                          <>
-                            <IconBolt />
-                            Quick Check
-                          </>
-                        )}
-                      </button>
-                      {investigating ? (
-                        <button type="button" className="btn btn-danger" onClick={handleCancel}>
-                          <IconX />
-                          Cancel
-                        </button>
+                      {reviewMode && report ? (
+                        <HighlightedEmail
+                          text={email}
+                          flags={report.red_flags ?? []}
+                          activeFlagIndex={focusedFlagIndex}
+                          onFocusFlag={onFocusFlag}
+                        />
                       ) : (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={!hasContent || busy !== null}
-                          onClick={() => void handleDeep()}
-                        >
-                          <IconSearch />
-                          Deep Investigate
-                          <kbd className="hotkey">{modKey}+↵</kbd>
-                        </button>
+                        <textarea
+                          ref={textareaRef}
+                          className="email-input"
+                          value={email}
+                          onChange={(e) => {
+                            setEmail(e.target.value);
+                            setActiveFixture(null);
+                          }}
+                          onKeyDown={onKeyDown}
+                          placeholder={placeholder}
+                          spellCheck={false}
+                          aria-label="Email or SMS content to analyze"
+                        />
                       )}
                     </div>
+
+                    {!reviewMode && (
+                      <>
+                        <div className="samples-row">
+                          <div className="samples-label">Try a sample</div>
+                          <div className="samples">
+                            {fixtures.map((f) => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                className={`chip${activeFixture === f.id ? " active" : ""}`}
+                                onClick={() => void onSelectFixture(f.id)}
+                              >
+                                {shortTitle(f.title)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={!hasContent || busy !== null}
+                            onClick={() => void handleQuick()}
+                          >
+                            {busy === "quick" ? (
+                              <>
+                                <span className="spinner" /> Checking…
+                              </>
+                            ) : (
+                              <>
+                                <IconBolt />
+                                Quick Check
+                              </>
+                            )}
+                          </button>
+                          {investigating ? (
+                            <button type="button" className="btn btn-danger" onClick={handleCancel}>
+                              <IconX />
+                              Cancel
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              disabled={!hasContent || busy !== null}
+                              onClick={() => void handleDeep()}
+                            >
+                              <IconSearch />
+                              Deep Investigate
+                              <kbd className="hotkey">{modKey}+↵</kbd>
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
 
                     {error && (
                       <div className="error-banner" role="alert">
@@ -637,6 +842,9 @@ Paste the full email — headers and body.`,
                     )}
                   </div>
                 </section>
+
+                {/* After report is ready, Investigation sits under Quick Check on the left */}
+                {report && investigationCard}
               </div>
 
               <div className="results" ref={resultsRef}>
@@ -675,15 +883,24 @@ Paste the full email — headers and body.`,
                         </div>
 
                         <div className="report-grid">
-                          {report.red_flags?.length > 0 && (
+                          {orderedRedFlags.length > 0 && (
                             <div className="report-col">
                               <div className="section-label">
                                 Red flags
-                                <span className="section-count">{report.red_flags.length}</span>
+                                <span className="section-count">{orderedRedFlags.length}</span>
                               </div>
-                              <ul className="flag-list">
-                                {report.red_flags.map((f, i) => (
-                                  <li key={i} className={`flag-item sev-border-${f.severity}`} style={{ animationDelay: `${i * 40}ms` }}>
+                              <ul className={`flag-list${focusedFlagIndex != null ? " is-focusing" : ""}`}>
+                                {orderedRedFlags.map(({ flag: f, index: i }) => (
+                                  <li
+                                    key={i}
+                                    ref={(el) => {
+                                      if (el) flagItemRefs.current.set(i, el);
+                                      else flagItemRefs.current.delete(i);
+                                    }}
+                                    className={`flag-item sev-border-${f.severity}${focusedFlagIndex === i ? " flag-focused" : ""}`}
+                                    onMouseEnter={() => setFocusedFlagIndex(i)}
+                                    onMouseLeave={() => setFocusedFlagIndex(null)}
+                                  >
                                     <div className="meta">
                                       <span>{formatFlagType(f.type)}</span>
                                       <span className={`sev ${f.severity}`}>{f.severity}</span>
@@ -751,96 +968,8 @@ Paste the full email — headers and body.`,
                   </section>
                 )}
 
-                <section className="card dark-card investigation-card">
-                  <div className="card-inner">
-                    <div className="card-head">
-                      <h3 className="card-title">
-                        <span className={`icon${investigating ? " live" : ""}`}>
-                          <IconRadar />
-                        </span>
-                        Investigation
-                      </h3>
-                      <span className="card-hint">
-                        {investigating ? (
-                          <span className="live-hint">
-                            <span className="live-dot" />
-                            Live
-                          </span>
-                        ) : (
-                          "Agent · web verify"
-                        )}
-                      </span>
-                    </div>
-
-                    {timeline.length === 0 && !investigating ? (
-                      <div className="empty-state">
-                        <div className="illus">
-                          <IconRadar />
-                        </div>
-                        <p>
-                          Deep Investigate launches a research agent that can search the web and explain
-                          every red flag.
-                        </p>
-                      </div>
-                    ) : (
-                      <ul className="tool-list fade-in">
-                        {timeline.map((item, i) => {
-                          if (item.kind === "status") {
-                            return (
-                              <li key={`s-${i}`} className="tool-step status" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
-                                <span className="tool-badge">{item.phase}</span>
-                                <span className="tool-query">{item.detail ?? "Working…"}</span>
-                              </li>
-                            );
-                          }
-                          if (item.kind === "error") {
-                            return (
-                              <li key={`e-${i}`} className="tool-step error" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
-                                <span className="tool-badge">Error</span>
-                                <span className="tool-query">{item.message}</span>
-                              </li>
-                            );
-                          }
-                          // tool — one row: Search / Open page + query + status
-                          return (
-                            <li
-                              key={item.toolCallId ?? `t-${i}`}
-                              className={`tool-step ${item.status}`}
-                              style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                            >
-                              <span className="tool-badge">{toolLabel(item.toolName)}</span>
-                              <span className="tool-query" title={item.query}>
-                                {item.query || "…"}
-                              </span>
-                              <span className={`tool-status ${item.status}`}>
-                                {item.status === "running" ? (
-                                  <>
-                                    <span className="spinner" />
-                                    Running
-                                  </>
-                                ) : item.status === "error" ? (
-                                  "Failed"
-                                ) : (
-                                  "Done"
-                                )}
-                              </span>
-                            </li>
-                          );
-                        })}
-                        {investigating && !timeline.some((t) => t.kind === "tool" && t.status === "running") && (
-                          <li className="tool-step running">
-                            <span className="tool-badge">Agent</span>
-                            <span className="tool-query muted">Analyzing results…</span>
-                            <span className="tool-status running">
-                              <span className="spinner" />
-                              Working
-                            </span>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </div>
-                </section>
+                {/* While investigating (no report yet), keep Investigation on the right */}
+                {!report && investigationCard}
               </div>
             </div>
           </div>
