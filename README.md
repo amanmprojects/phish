@@ -1,4 +1,4 @@
-# CampusGuard — AI-Generated Phishing Detector
+# Phish
 
 Hackathon prototype: students paste a suspicious email/SMS, get a **risk score**, **red flags**, and **one safe next action**. Deep investigation is powered by a **[Pi](https://github.com/earendil-works/pi-mono) agent** with **Tavily** web search (no shell access).
 

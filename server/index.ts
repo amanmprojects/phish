@@ -110,7 +110,7 @@ if (existsSync(distDir)) {
 const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? "127.0.0.1";
 
-console.log(`CampusGuard server listening on http://${hostname}:${port}`);
+console.log(`Phish server listening on http://${hostname}:${port}`);
 console.log(`Tavily: ${process.env.TAVILY_API_KEY ? "configured" : "missing (text-only deep check)"}`);
 
 serve({ fetch: app.fetch, port, hostname });
