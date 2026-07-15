@@ -199,6 +199,51 @@ function formatFlagType(type: string) {
   return type.replaceAll("_", " ");
 }
 
+function toolLabel(name: string) {
+  const n = name.toLowerCase();
+  if (n.includes("search")) return "Search";
+  if (n.includes("fetch") || n.includes("browse")) return "Open page";
+  return formatFlagType(name);
+}
+
+/** Merge tool_end into the matching tool_start so the UI shows one row per call. */
+function mergeTimelineItem(prev: TimelineItem[], item: TimelineItem): TimelineItem[] {
+  if (item.kind === "tool" && item.status !== "running") {
+    let idx = -1;
+    if (item.toolCallId) {
+      idx = prev.findIndex(
+        (x) => x.kind === "tool" && x.toolCallId === item.toolCallId && x.status === "running",
+      );
+    }
+    if (idx < 0) {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const x = prev[i];
+        if (x.kind === "tool" && x.status === "running" && x.toolName === item.toolName) {
+          idx = i;
+          break;
+        }
+      }
+    }
+    if (idx >= 0) {
+      const cur = prev[idx];
+      if (cur.kind !== "tool") return [...prev, item];
+      const next = [...prev];
+      next[idx] = {
+        ...cur,
+        status: item.status,
+        at: item.at,
+      };
+      return next;
+    }
+  }
+  // Skip noisy status lines that only clutter the log
+  if (item.kind === "status" && (item.phase === "investigating" || item.phase === "starting")) {
+    // keep a single status if empty; otherwise skip duplicates of working state
+    if (prev.some((x) => x.kind === "status" && x.phase === item.phase)) return prev;
+  }
+  return [...prev, item];
+}
+
 export default function App() {
   const [email, setEmail] = useState("");
   const [fixtures, setFixtures] = useState<FixtureMeta[]>([]);
@@ -206,7 +251,6 @@ export default function App() {
   const [quick, setQuick] = useState<QuickCheckResult | null>(null);
   const [report, setReport] = useState<PhishReport | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
-  const [agentText, setAgentText] = useState("");
   const [busy, setBusy] = useState<"quick" | "deep" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -225,7 +269,6 @@ export default function App() {
     setQuick(null);
     setReport(null);
     setTimeline([]);
-    setAgentText("");
   }, []);
 
   const onSelectFixture = useCallback(
@@ -260,7 +303,8 @@ export default function App() {
       const result = await runQuickCheck(email);
       setQuick(result);
       requestAnimationFrame(() => {
-        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        // Quick check lives under the message box — keep view on compose column
+        textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -285,7 +329,6 @@ export default function App() {
     setError(null);
     setReport(null);
     setTimeline([]);
-    setAgentText("");
     setQuick(null);
 
     requestAnimationFrame(() => {
@@ -297,8 +340,9 @@ export default function App() {
         email,
         {
           onQuick: setQuick,
-          onTimeline: (item) => setTimeline((t) => [...t, item]),
-          onText: (delta) => setAgentText((t) => t + delta),
+          onTimeline: (item) => setTimeline((t) => mergeTimelineItem(t, item)),
+          // Agent stream often includes raw JSON — keep Investigation query-only
+          onText: undefined,
           onReport: (r) => {
             setReport(r);
             requestAnimationFrame(() => {
@@ -440,116 +484,116 @@ Paste the full email — headers and body.`,
             </header>
 
             <div className="workspace">
-              <section className="card compose">
-                <div className="card-inner">
-                  <div className="card-head">
-                    <h3 className="card-title">
-                      <span className="icon">
-                        <IconMail />
-                      </span>
-                      Message to analyze
-                    </h3>
-                    <span className="card-hint">Headers + body · never stored</span>
-                  </div>
+              <div className="compose-col">
+                <section className="card compose">
+                  <div className="card-inner">
+                    <div className="card-head">
+                      <h3 className="card-title">
+                        <span className="icon">
+                          <IconMail />
+                        </span>
+                        Message to analyze
+                      </h3>
+                      <span className="card-hint">Headers + body · never stored</span>
+                    </div>
 
-                  <div className="email-shell">
-                    <div className="email-shell-bar">
-                      <span className="meta">Raw email / SMS paste</span>
-                      <div className="shell-actions">
-                        <span className="char-count">{email.length.toLocaleString()} chars</span>
-                        {hasContent && (
-                          <button type="button" className="ghost-btn" onClick={handleClear} title="Clear message">
-                            <IconX />
-                            Clear
+                    <div className="email-shell">
+                      <div className="email-shell-bar">
+                        <span className="meta">Raw email / SMS paste</span>
+                        <div className="shell-actions">
+                          <span className="char-count">{email.length.toLocaleString()} chars</span>
+                          {hasContent && (
+                            <button type="button" className="ghost-btn" onClick={handleClear} title="Clear message">
+                              <IconX />
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <textarea
+                        ref={textareaRef}
+                        className="email-input"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setActiveFixture(null);
+                        }}
+                        onKeyDown={onKeyDown}
+                        placeholder={placeholder}
+                        spellCheck={false}
+                        aria-label="Email or SMS content to analyze"
+                      />
+                    </div>
+
+                    <div className="samples-row">
+                      <div className="samples-label">Try a sample</div>
+                      <div className="samples">
+                        {fixtures.map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            className={`chip tone-${expectedTone(f.expected)}${activeFixture === f.id ? " active" : ""}`}
+                            onClick={() => void onSelectFixture(f.id)}
+                            title={`Expected: ${f.expected}`}
+                          >
+                            <span className="chip-dot" />
+                            {shortTitle(f.title)}
+                            <span className="expected">{f.expected}</span>
                           </button>
-                        )}
+                        ))}
                       </div>
                     </div>
-                    <textarea
-                      ref={textareaRef}
-                      className="email-input"
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setActiveFixture(null);
-                      }}
-                      onKeyDown={onKeyDown}
-                      placeholder={placeholder}
-                      spellCheck={false}
-                      aria-label="Email or SMS content to analyze"
-                    />
-                  </div>
 
-                  <div className="samples-row">
-                    <div className="samples-label">Try a sample</div>
-                    <div className="samples">
-                      {fixtures.map((f) => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          className={`chip tone-${expectedTone(f.expected)}${activeFixture === f.id ? " active" : ""}`}
-                          onClick={() => void onSelectFixture(f.id)}
-                          title={`Expected: ${f.expected}`}
-                        >
-                          <span className="chip-dot" />
-                          {shortTitle(f.title)}
-                          <span className="expected">{f.expected}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="actions">
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={!hasContent || busy !== null}
-                      onClick={() => void handleQuick()}
-                    >
-                      {busy === "quick" ? (
-                        <>
-                          <span className="spinner" /> Checking…
-                        </>
-                      ) : (
-                        <>
-                          <IconBolt />
-                          Quick Check
-                        </>
-                      )}
-                    </button>
-                    {investigating ? (
-                      <button type="button" className="btn btn-danger" onClick={handleCancel}>
-                        <IconX />
-                        Cancel
-                      </button>
-                    ) : (
+                    <div className="actions">
                       <button
                         type="button"
-                        className="btn btn-primary"
+                        className="btn btn-secondary"
                         disabled={!hasContent || busy !== null}
-                        onClick={() => void handleDeep()}
+                        onClick={() => void handleQuick()}
                       >
-                        <IconSearch />
-                        Deep Investigate
-                        <kbd className="hotkey">{modKey}+↵</kbd>
+                        {busy === "quick" ? (
+                          <>
+                            <span className="spinner" /> Checking…
+                          </>
+                        ) : (
+                          <>
+                            <IconBolt />
+                            Quick Check
+                          </>
+                        )}
                       </button>
+                      {investigating ? (
+                        <button type="button" className="btn btn-danger" onClick={handleCancel}>
+                          <IconX />
+                          Cancel
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!hasContent || busy !== null}
+                          onClick={() => void handleDeep()}
+                        >
+                          <IconSearch />
+                          Deep Investigate
+                          <kbd className="hotkey">{modKey}+↵</kbd>
+                        </button>
+                      )}
+                    </div>
+
+                    {error && (
+                      <div className="error-banner" role="alert">
+                        <IconAlert />
+                        <span>{error}</span>
+                        <button type="button" className="ghost-btn error-dismiss" onClick={() => setError(null)} aria-label="Dismiss error">
+                          <IconX />
+                        </button>
+                      </div>
                     )}
                   </div>
+                </section>
 
-                  {error && (
-                    <div className="error-banner" role="alert">
-                      <IconAlert />
-                      <span>{error}</span>
-                      <button type="button" className="ghost-btn error-dismiss" onClick={() => setError(null)} aria-label="Dismiss error">
-                        <IconX />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <div className="results" ref={resultsRef}>
-                <section className="card">
+                <section className="card quick-card">
                   <div className="card-inner">
                     <div className="card-head">
                       <h3 className="card-title">
@@ -569,7 +613,7 @@ Paste the full email — headers and body.`,
                         <div className="skeleton block" />
                       </div>
                     ) : !quick ? (
-                      <div className="empty-state">
+                      <div className="empty-state compact">
                         <div className="illus">
                           <IconBolt />
                         </div>
@@ -602,104 +646,21 @@ Paste the full email — headers and body.`,
                     )}
                   </div>
                 </section>
+              </div>
 
-                <section className="card dark-card investigation-card">
-                  <div className="card-inner">
-                    <div className="card-head">
-                      <h3 className="card-title">
-                        <span className={`icon${investigating ? " live" : ""}`}>
-                          <IconRadar />
-                        </span>
-                        Investigation
-                      </h3>
-                      <span className="card-hint">
-                        {investigating ? (
-                          <span className="live-hint">
-                            <span className="live-dot" />
-                            Live
+              <div className="results" ref={resultsRef}>
+                {report && (
+                  <section className="card report-card" ref={reportRef}>
+                    <div className="card-inner">
+                      <div className="card-head">
+                        <h3 className="card-title">
+                          <span className="icon">
+                            <IconFile />
                           </span>
-                        ) : (
-                          "Agent · web verify"
-                        )}
-                      </span>
-                    </div>
-
-                    {timeline.length === 0 && !investigating ? (
-                      <div className="empty-state">
-                        <div className="illus">
-                          <IconRadar />
-                        </div>
-                        <p>
-                          Deep Investigate launches a research agent that can search the web and explain
-                          every red flag.
-                        </p>
-                      </div>
-                    ) : (
-                      <ul className="timeline fade-in">
-                        {timeline.map((item, i) => (
-                          <li
-                            key={i}
-                            className={`timeline-item${item.kind === "tool" ? " tool" : ""}${item.kind === "error" ? " error" : ""}`}
-                            style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                          >
-                            <span className="rail-dot" />
-                            {item.kind === "status" && (
-                              <>
-                                <div className="kind">status · {item.phase}</div>
-                                <div className="body">{item.detail ?? "…"}</div>
-                              </>
-                            )}
-                            {item.kind === "tool" && (
-                              <>
-                                <div className="kind">
-                                  tool · {item.toolName}
-                                  {item.isError ? " · error" : item.summary ? " · done" : " · start"}
-                                </div>
-                                <div className="body">
-                                  {item.summary
-                                    ? item.summary
-                                    : item.args
-                                      ? JSON.stringify(item.args).slice(0, 220)
-                                      : "…"}
-                                </div>
-                              </>
-                            )}
-                            {item.kind === "error" && (
-                              <>
-                                <div className="kind">error</div>
-                                <div className="body">{item.message}</div>
-                              </>
-                            )}
-                          </li>
-                        ))}
-                        {investigating && (
-                          <li className="timeline-item live">
-                            <span className="rail-dot" />
-                            <div className="kind">
-                              <span className="spinner" style={{ marginRight: 6, verticalAlign: -2 }} />
-                              working
-                            </div>
-                            <div className="body muted">Agent is still investigating…</div>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                    {agentText && <pre className="agent-text">{agentText}</pre>}
-                  </div>
-                </section>
-
-                <section className="card report-card" ref={reportRef}>
-                  <div className="card-inner">
-                    <div className="card-head">
-                      <h3 className="card-title">
-                        <span className="icon">
-                          <IconFile />
-                        </span>
-                        Full report
-                      </h3>
-                      <div className="card-head-right">
-                        <span className="card-hint">Score · flags · next step</span>
-                        {report && (
+                          Full report
+                        </h3>
+                        <div className="card-head-right">
+                          <span className="card-hint">Score · flags · next step</span>
                           <button type="button" className="ghost-btn" onClick={() => void handleCopyReport()}>
                             {copied ? (
                               <>
@@ -713,18 +674,9 @@ Paste the full email — headers and body.`,
                               </>
                             )}
                           </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {!report ? (
-                      <div className="empty-state">
-                        <div className="illus">
-                          <IconFile />
                         </div>
-                        <p>Your detailed risk report lands here after Deep Investigate finishes.</p>
                       </div>
-                    ) : (
+
                       <div className="fade-in report-body">
                         <div className="report-hero">
                           <ScoreBlock label={report.label} score={report.score} />
@@ -804,6 +756,97 @@ Paste the full email — headers and body.`,
                           </div>
                         )}
                       </div>
+                    </div>
+                  </section>
+                )}
+
+                <section className="card dark-card investigation-card">
+                  <div className="card-inner">
+                    <div className="card-head">
+                      <h3 className="card-title">
+                        <span className={`icon${investigating ? " live" : ""}`}>
+                          <IconRadar />
+                        </span>
+                        Investigation
+                      </h3>
+                      <span className="card-hint">
+                        {investigating ? (
+                          <span className="live-hint">
+                            <span className="live-dot" />
+                            Live
+                          </span>
+                        ) : (
+                          "Agent · web verify"
+                        )}
+                      </span>
+                    </div>
+
+                    {timeline.length === 0 && !investigating ? (
+                      <div className="empty-state">
+                        <div className="illus">
+                          <IconRadar />
+                        </div>
+                        <p>
+                          Deep Investigate launches a research agent that can search the web and explain
+                          every red flag.
+                        </p>
+                      </div>
+                    ) : (
+                      <ul className="tool-list fade-in">
+                        {timeline.map((item, i) => {
+                          if (item.kind === "status") {
+                            return (
+                              <li key={`s-${i}`} className="tool-step status" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
+                                <span className="tool-badge">{item.phase}</span>
+                                <span className="tool-query">{item.detail ?? "Working…"}</span>
+                              </li>
+                            );
+                          }
+                          if (item.kind === "error") {
+                            return (
+                              <li key={`e-${i}`} className="tool-step error" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
+                                <span className="tool-badge">Error</span>
+                                <span className="tool-query">{item.message}</span>
+                              </li>
+                            );
+                          }
+                          // tool — one row: Search / Open page + query + status
+                          return (
+                            <li
+                              key={item.toolCallId ?? `t-${i}`}
+                              className={`tool-step ${item.status}`}
+                              style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+                            >
+                              <span className="tool-badge">{toolLabel(item.toolName)}</span>
+                              <span className="tool-query" title={item.query}>
+                                {item.query || "…"}
+                              </span>
+                              <span className={`tool-status ${item.status}`}>
+                                {item.status === "running" ? (
+                                  <>
+                                    <span className="spinner" />
+                                    Running
+                                  </>
+                                ) : item.status === "error" ? (
+                                  "Failed"
+                                ) : (
+                                  "Done"
+                                )}
+                              </span>
+                            </li>
+                          );
+                        })}
+                        {investigating && !timeline.some((t) => t.kind === "tool" && t.status === "running") && (
+                          <li className="tool-step running">
+                            <span className="tool-badge">Agent</span>
+                            <span className="tool-query muted">Analyzing results…</span>
+                            <span className="tool-status running">
+                              <span className="spinner" />
+                              Working
+                            </span>
+                          </li>
+                        )}
+                      </ul>
                     )}
                   </div>
                 </section>

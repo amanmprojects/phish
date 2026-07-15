@@ -38,5 +38,13 @@ export interface FixtureMeta {
 
 export type TimelineItem =
   | { kind: "status"; phase: string; detail?: string; at: number }
-  | { kind: "tool"; toolName: string; args: unknown; summary?: string; isError?: boolean; at: number }
+  | {
+      kind: "tool";
+      toolCallId?: string;
+      toolName: string;
+      /** Human-readable search query or URL being checked */
+      query: string;
+      status: "running" | "done" | "error";
+      at: number;
+    }
   | { kind: "error"; message: string; at: number };

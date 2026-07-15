@@ -361,10 +361,17 @@ a {
   flex: 1;
 }
 
-.workspace .compose {
-  margin-bottom: 0;
+.compose-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
   position: sticky;
   top: 16px;
+}
+
+.workspace .compose {
+  margin-bottom: 0;
 }
 
 /* ── Cards ── */
@@ -782,12 +789,117 @@ a {
   scroll-margin-top: 16px;
 }
 
-.investigation-card .timeline {
-  max-height: 320px;
+.investigation-card .timeline,
+.investigation-card .tool-list {
+  max-height: 420px;
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(15, 23, 42, 0.15) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* ── Investigation tool steps (query-only, start+done merged) ── */
+.tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  animation: fade-up 0.3s var(--ease) both;
+}
+
+.tool-step.status {
+  grid-template-columns: auto minmax(0, 1fr);
+  opacity: 0.85;
+}
+
+.tool-step.error {
+  border-color: rgba(225, 29, 72, 0.35);
+  background: rgba(225, 29, 72, 0.1);
+}
+
+.tool-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+.tool-step.running .tool-badge {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tool-step.done .tool-badge {
+  background: rgba(22, 163, 74, 0.2);
+  color: #86efac;
+}
+
+.tool-step.error .tool-badge {
+  background: rgba(225, 29, 72, 0.25);
+  color: #fecdd3;
+}
+
+.tool-query {
+  font-size: 0.88rem;
+  color: #e2e8f0;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.tool-query.muted {
+  color: #94a3b8;
+}
+
+.tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.tool-status.running {
+  color: #cbd5e1;
+}
+
+.tool-status.done {
+  color: #86efac;
+}
+
+.tool-status.error {
+  color: #fda4af;
+}
+
+.tool-step .spinner {
+  border-color: rgba(255, 255, 255, 0.2);
+  border-top-color: #e2e8f0;
+  width: 12px;
+  height: 12px;
 }
 
 /* Dark contrast cards (like File Preview / Team in the mock) */
@@ -945,7 +1057,7 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .workspace .compose {
+  .compose-col {
     position: static;
   }
 
@@ -1504,6 +1616,22 @@ a {
   max-width: 28ch;
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.empty-state.compact {
+  padding: 20px 12px;
+}
+
+.empty-state.compact .illus {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+}
+
+.empty-state.compact .illus svg {
+  width: 22px;
+  height: 22px;
 }
 
 /* ── Skeleton ── */

@@ -1,5 +1,39 @@
 import type { FixtureMeta, PhishReport, QuickCheckResult, TimelineItem } from "./types";
 
+/** Extract a short human-readable query/URL from tool args (never dump raw JSON). */
+export function formatToolQuery(toolName: string, args: unknown): string {
+  if (args == null) return toolName.replaceAll("_", " ");
+  if (typeof args === "string") {
+    const t = args.trim();
+    return t.length > 140 ? t.slice(0, 140) + "…" : t || toolName.replaceAll("_", " ");
+  }
+  if (typeof args !== "object") return String(args);
+
+  const o = args as Record<string, unknown>;
+  const pick =
+    (typeof o.query === "string" && o.query) ||
+    (typeof o.q === "string" && o.q) ||
+    (typeof o.url === "string" && o.url) ||
+    (typeof o.search === "string" && o.search) ||
+    (Array.isArray(o.urls) && typeof o.urls[0] === "string" && o.urls[0]) ||
+    (typeof o.input === "string" && o.input) ||
+    "";
+
+  if (pick) {
+    const t = pick.trim();
+    return t.length > 140 ? t.slice(0, 140) + "…" : t;
+  }
+
+  // Last resort: first string-ish field, not full JSON dump
+  for (const v of Object.values(o)) {
+    if (typeof v === "string" && v.trim()) {
+      const t = v.trim();
+      return t.length > 140 ? t.slice(0, 140) + "…" : t;
+    }
+  }
+  return toolName.replaceAll("_", " ");
+}
+
 export async function fetchFixtures(): Promise<FixtureMeta[]> {
   const res = await fetch("/api/fixtures");
   if (!res.ok) throw new Error("Failed to load fixtures");
@@ -98,18 +132,20 @@ export async function runDeepAnalyze(
         case "tool_start":
           handlers.onTimeline?.({
             kind: "tool",
+            toolCallId: payload.toolCallId ? String(payload.toolCallId) : undefined,
             toolName: String(payload.toolName ?? "tool"),
-            args: payload.args,
+            query: formatToolQuery(String(payload.toolName ?? "tool"), payload.args),
+            status: "running",
             at,
           });
           break;
         case "tool_end":
           handlers.onTimeline?.({
             kind: "tool",
+            toolCallId: payload.toolCallId ? String(payload.toolCallId) : undefined,
             toolName: String(payload.toolName ?? "tool"),
-            args: undefined,
-            summary: payload.summary ? String(payload.summary) : undefined,
-            isError: Boolean(payload.isError),
+            query: "",
+            status: payload.isError ? "error" : "done",
             at,
           });
           break;
