@@ -8,18 +8,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { fetchFixtures, loadFixture, runDeepAnalyze, runQuickCheck } from "./api";
-import type { FixtureMeta, PhishReport, QuickCheckResult, RiskLabel, TimelineItem } from "./types";
+import type { FixtureMeta, PhishReport, QuickCheckResult, TimelineItem } from "./types";
 
 function ringColor(label: string) {
   if (label === "Safe") return "var(--safe)";
   if (label === "Suspicious") return "var(--suspicious)";
   return "var(--high)";
-}
-
-function expectedTone(label: RiskLabel): "safe" | "suspicious" | "high" {
-  if (label === "Safe") return "safe";
-  if (label === "Suspicious") return "suspicious";
-  return "high";
 }
 
 function ScoreBlock({ label, score }: { label: string; score: number }) {
@@ -532,13 +526,10 @@ Paste the full email — headers and body.`,
                           <button
                             key={f.id}
                             type="button"
-                            className={`chip tone-${expectedTone(f.expected)}${activeFixture === f.id ? " active" : ""}`}
+                            className={`chip${activeFixture === f.id ? " active" : ""}`}
                             onClick={() => void onSelectFixture(f.id)}
-                            title={`Expected: ${f.expected}`}
                           >
-                            <span className="chip-dot" />
                             {shortTitle(f.title)}
-                            <span className="expected">{f.expected}</span>
                           </button>
                         ))}
                       </div>

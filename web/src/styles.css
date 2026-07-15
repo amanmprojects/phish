@@ -585,7 +585,7 @@ a {
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-soft);
   border-radius: var(--radius-pill);
-  padding: 8px 14px 8px 12px;
+  padding: 8px 14px;
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;
@@ -594,29 +594,6 @@ a {
   align-items: center;
   gap: 6px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-}
-
-.chip-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--muted);
-}
-
-.chip.tone-safe .chip-dot {
-  background: var(--safe);
-  box-shadow: 0 0 0 3px var(--safe-dim);
-}
-
-.chip.tone-suspicious .chip-dot {
-  background: var(--suspicious);
-  box-shadow: 0 0 0 3px var(--suspicious-dim);
-}
-
-.chip.tone-high .chip-dot {
-  background: var(--high);
-  box-shadow: 0 0 0 3px var(--high-dim);
 }
 
 .chip:hover {
@@ -632,25 +609,6 @@ a {
   background: var(--dark-card);
   color: #fff;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
-}
-
-.chip.active .chip-dot {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
-}
-
-.chip.active .expected {
-  opacity: 0.75;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.chip .expected {
-  display: inline-block;
-  margin-left: 2px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  opacity: 0.65;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
 
 .actions {
