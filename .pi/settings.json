@@ -1,0 +1,5 @@
+{
+  "packages": [
+    "npm:@tavily/pi-extension"
+  ]
+}

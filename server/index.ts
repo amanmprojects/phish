@@ -14,10 +14,16 @@ import { listFixtures, loadFixture } from "./fixtures.ts";
 
 const app = new Hono();
 
+const bindHost = process.env.HOST ?? "127.0.0.1";
+const publicBind = bindHost === "0.0.0.0" || bindHost === "::" || process.env.CORS_OPEN === "1";
+
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8787"],
+    // Allow any origin when public-bound so LAN clients work (Hono: "*" or a function)
+    origin: publicBind
+      ? "*"
+      : ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8787"],
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type"],
   }),
@@ -108,9 +114,12 @@ if (existsSync(distDir)) {
 }
 
 const port = Number(process.env.PORT ?? 8787);
-const hostname = process.env.HOST ?? "127.0.0.1";
+const hostname = bindHost;
 
 console.log(`Phish server listening on http://${hostname}:${port}`);
+if (publicBind) {
+  console.log(`Public bind enabled — reachable on this machine's LAN IPs (port ${port})`);
+}
 console.log(`Tavily: ${process.env.TAVILY_API_KEY ? "configured" : "missing (text-only deep check)"}`);
 
 serve({ fetch: app.fetch, port, hostname });
