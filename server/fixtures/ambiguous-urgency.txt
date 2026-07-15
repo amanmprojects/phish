@@ -1,0 +1,15 @@
+From: Recruiter <maya.s@startupmail.io>
+To: you@studentmail.com
+Subject: Frontend intern role – please respond today
+
+Hi,
+
+We saw your profile and think you'd be a fit for our frontend internship.
+Could you fill this form today so we can schedule interviews this week?
+https://forms.startupmail.io/intern-apply
+
+No payment required. We'll only ask for your resume and GitHub.
+
+Thanks,
+Maya
+Talent, Northline Labs
