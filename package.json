@@ -5,15 +5,18 @@
   "type": "module",
   "description": "Phish — AI phishing detector",
   "scripts": {
-    "dev": "concurrently -k -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "dev:public": "bash scripts/run-public.sh",
+    "dev:all": "concurrently -k -n server,web -c blue,green npm:dev:server npm:dev:web",
+    "dev:public": "node scripts/run-public.mjs",
     "build": "vite build --config web/vite.config.ts",
     "start": "tsx server/index.ts",
-    "start:public": "HOST=0.0.0.0 CORS_OPEN=1 tsx server/index.ts",
+    "start:prod": "npm run build && npm start",
+    "start:public": "node scripts/start-public.mjs",
     "cli": "tsx server/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test server/**/*.test.ts web/src/**/*.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.7",

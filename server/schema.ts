@@ -31,6 +31,8 @@ export interface PhishReport {
   evidence: EvidenceItem[];
   safe_next_action: string;
   what_not_to_do: string[];
+  /** True when analysis ran without web_search/web_fetch. */
+  text_only?: boolean;
 }
 
 export interface ParsedEmail {
@@ -39,9 +41,14 @@ export interface ParsedEmail {
   to?: string;
   subject?: string;
   date?: string;
+  replyTo?: string;
+  fromDomain?: string;
+  fromDisplayName?: string;
   body: string;
   urls: string[];
   amounts: string[];
+  upiIds?: string[];
+  urlHosts?: string[];
 }
 
 export interface QuickCheckResult {
@@ -60,6 +67,39 @@ export type AgentEvent =
   | { type: "report"; result: PhishReport }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export function scoreToLabel(score: number): RiskLabel {
+  if (score >= 70) return "High Risk";
+  if (score >= 35) return "Suspicious";
+  return "Safe";
+}
+
+export function labelRank(label: RiskLabel): number {
+  if (label === "High Risk") return 2;
+  if (label === "Suspicious") return 1;
+  return 0;
+}
+
+/**
+ * Prefer the more cautious (higher-risk) signal between model label and score.
+ * Ensures score falls in the chosen label's band.
+ */
+export function alignLabelAndScore(label: RiskLabel, score: number): { label: RiskLabel; score: number } {
+  const s = Math.min(100, Math.max(0, Math.round(score)));
+  const fromScore = scoreToLabel(s);
+  const finalLabel = labelRank(label) >= labelRank(fromScore) ? label : fromScore;
+
+  let aligned = s;
+  if (finalLabel === "High Risk" && aligned < 70) aligned = 70;
+  else if (finalLabel === "Suspicious") {
+    if (aligned < 35) aligned = 35;
+    if (aligned >= 70) aligned = 69;
+  } else if (finalLabel === "Safe" && aligned >= 35) {
+    aligned = 34;
+  }
+
+  return { label: finalLabel, score: aligned };
+}
 
 export function emptyReport(partial?: Partial<PhishReport>): PhishReport {
   return {

@@ -31,7 +31,7 @@ lan_ips() {
 mapfile -t IPS < <(lan_ips | awk 'NF && !seen[$0]++')
 
 echo "=============================================="
-echo "  CampusGuard — public (0.0.0.0)"
+echo "  Phish — public (0.0.0.0)"
 echo "=============================================="
 echo "  API:  http://0.0.0.0:${PORT}"
 echo "  UI:   http://0.0.0.0:${WEB_PORT}"

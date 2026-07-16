@@ -21,6 +21,7 @@ export interface PhishReport {
   evidence: EvidenceItem[];
   safe_next_action: string;
   what_not_to_do: string[];
+  text_only?: boolean;
 }
 
 export interface QuickCheckResult {
@@ -48,3 +49,25 @@ export type TimelineItem =
       at: number;
     }
   | { kind: "error"; message: string; at: number };
+
+export type AppView = "analyze" | "history" | "settings";
+
+export interface HistoryEntry {
+  id: string;
+  at: number;
+  label: RiskLabel;
+  score: number;
+  summary: string;
+  preview: string;
+  safe_next_action: string;
+}
+
+export function formatFlagType(type: string) {
+  return type.replaceAll("_", " ");
+}
+
+export function labelRank(label: RiskLabel): number {
+  if (label === "High Risk") return 2;
+  if (label === "Suspicious") return 1;
+  return 0;
+}

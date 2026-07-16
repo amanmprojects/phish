@@ -11,7 +11,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "web/**/*.ts", "web/**/*.tsx"]
+  "include": ["server/**/*.ts", "web/**/*.ts", "web/**/*.tsx"],
+  "exclude": ["node_modules", "web/dist"]
 }

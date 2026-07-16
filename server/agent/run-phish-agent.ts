@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Model } from "@earendil-works/pi-ai/compat";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -13,7 +12,10 @@ import {
 import { formatParsedForPrompt, parseEmail } from "../parse-email.ts";
 import type { AgentEvent, PhishReport } from "../schema.ts";
 import { fallbackReportFromText, parsePhishReport } from "./parse-result.ts";
-import { buildUserPrompt, PHISH_SYSTEM_PROMPT } from "./system-prompt.ts";
+import { buildUserPrompt, PHISH_SYSTEM_PROMPT, RETRY_JSON_PROMPT } from "./system-prompt.ts";
+
+/** Avoid hard dependency on @earendil-works/pi-ai path exports for typecheck. */
+type AgentModel = NonNullable<ReturnType<ModelRegistry["find"]>>;
 
 function firstExisting(paths: string[]): string | null {
   for (const p of paths) {
@@ -51,16 +53,15 @@ function summarizeToolResult(result: unknown): string {
 function pickModel(
   modelRegistry: ModelRegistry,
   settings: { defaultProvider?: string; defaultModel?: string },
-): Model<any> | undefined {
+): AgentModel | undefined {
   const available = modelRegistry.getAvailable();
   const key = (p: string, id: string) => `${p}::${id}`;
   const availableSet = new Set(available.map((m) => key(m.provider, m.id)));
 
-  const tryPick = (provider?: string, id?: string) => {
+  const tryPick = (provider?: string, id?: string): AgentModel | undefined => {
     if (!provider || !id) return undefined;
     const m = modelRegistry.find(provider, id);
     if (m && availableSet.has(key(m.provider, m.id))) return m;
-    // Same provider, any available model (settings may list an outdated id)
     return available.find((a) => a.provider === provider);
   };
 
@@ -70,7 +71,6 @@ function pickModel(
   const fromSettings = tryPick(settings.defaultProvider, settings.defaultModel);
   if (fromSettings) return fromSettings;
 
-  // Prefer supergrok if present (works with pi-supergrok OAuth on this machine)
   const supergrok = available.find((m) => m.provider === "supergrok");
   if (supergrok) return supergrok;
 
@@ -105,11 +105,23 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
+function abortError(): Error {
+  const err = new Error("Analysis cancelled");
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
 export interface RunPhishAgentOptions {
   rawEmail: string;
   onEvent?: (event: AgentEvent) => void;
   /** When false, skip Tavily. Default: true if TAVILY_API_KEY is set. */
   enableWeb?: boolean;
+  /** Cancel the run (disposes session). */
+  signal?: AbortSignal;
 }
 
 export interface RunPhishAgentResult {
@@ -119,8 +131,10 @@ export interface RunPhishAgentResult {
 }
 
 export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunPhishAgentResult> {
-  const { rawEmail, onEvent } = options;
+  const { rawEmail, onEvent, signal } = options;
   const emit = (e: AgentEvent) => onEvent?.(e);
+
+  throwIfAborted(signal);
 
   const parsed = parseEmail(rawEmail);
   const hasTavilyKey = Boolean(process.env.TAVILY_API_KEY?.trim());
@@ -159,11 +173,8 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
     defaultModel: settingsManager.getDefaultModel(),
   };
 
-  // Only load known-safe extensions (model provider + optional Tavily). No bash stack.
   const extensionPaths = [supergrokPath, tavilyPath].filter((p): p is string => Boolean(p));
 
-  // createAgentSessionServices reloads extensions and flushes provider registrations
-  // onto the model registry *before* we pick a model — required for SuperGrok.
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
@@ -179,6 +190,8 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
       appendSystemPromptOverride: () => [],
     },
   });
+
+  throwIfAborted(signal);
 
   for (const d of services.diagnostics) {
     if (d.type === "error" || d.type === "warning") {
@@ -229,9 +242,27 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
   }
 
   let streamedText = "";
+  let disposed = false;
+  const disposeSession = () => {
+    if (disposed) return;
+    disposed = true;
+    try {
+      session.dispose();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onAbort = () => {
+    disposeSession();
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
+    throwIfAborted(signal);
+
     session.subscribe((event) => {
+      if (signal?.aborted) return;
       if (event.type === "tool_execution_start") {
         emit({
           type: "tool_start",
@@ -263,6 +294,7 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
       webToolsEnabled: usedWebTools,
     });
     await session.prompt(prompt);
+    throwIfAborted(signal);
 
     let assistantText = "";
     try {
@@ -273,9 +305,27 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
       throw err;
     }
 
-    const report =
-      parsePhishReport(assistantText) ??
-      fallbackReportFromText(assistantText || "No response from agent.");
+    let report = parsePhishReport(assistantText);
+
+    // One structured-output retry if JSON missing
+    if (!report) {
+      emit({
+        type: "status",
+        phase: "retry",
+        detail: "Retrying for structured JSON report…",
+      });
+      streamedText = "";
+      await session.prompt(RETRY_JSON_PROMPT);
+      throwIfAborted(signal);
+      try {
+        assistantText = extractAssistantText(session.messages ?? []) || streamedText || assistantText;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emit({ type: "error", message });
+        throw err;
+      }
+      report = parsePhishReport(assistantText) ?? fallbackReportFromText(assistantText || "No response from agent.");
+    }
 
     if (!usedWebTools) {
       report.evidence = [
@@ -285,11 +335,15 @@ export async function runPhishAgent(options: RunPhishAgentOptions): Promise<RunP
           detail: "Web tools were disabled or unavailable for this run.",
         },
       ];
+      report.text_only = true;
+    } else {
+      report.text_only = false;
     }
 
     emit({ type: "report", result: report });
     return { report, assistantText, usedWebTools };
   } finally {
-    session.dispose();
+    signal?.removeEventListener("abort", onAbort);
+    disposeSession();
   }
 }

@@ -27,6 +27,10 @@ const META: Record<string, Omit<FixtureMeta, "id">> = {
     title: "College ERP fee reminder (Safe)",
     expected: "Safe",
   },
+  "prompt-injection": {
+    title: "Prompt injection attempt (High Risk)",
+    expected: "High Risk",
+  },
 };
 
 export function listFixtures(): FixtureMeta[] {

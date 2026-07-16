@@ -1,4 +1,9 @@
-import { emptyReport, type PhishReport, type RiskLabel } from "../schema.ts";
+import {
+  alignLabelAndScore,
+  emptyReport,
+  type PhishReport,
+  type RiskLabel,
+} from "../schema.ts";
 
 const LABELS = new Set<RiskLabel>(["Safe", "Suspicious", "High Risk"]);
 
@@ -31,7 +36,6 @@ export function parsePhishReport(text: string): PhishReport | null {
   const lastBrace = text.lastIndexOf("{");
   if (lastBrace >= 0) {
     const slice = text.slice(lastBrace);
-    // try to balance braces roughly
     let depth = 0;
     let end = -1;
     for (let i = 0; i < slice.length; i++) {
@@ -53,6 +57,7 @@ export function parsePhishReport(text: string): PhishReport | null {
       const obj = JSON.parse(raw) as Record<string, unknown>;
       const score = clampScore(obj.score);
       const label = normalizeLabel(obj.label, score);
+      const aligned = alignLabelAndScore(label, score);
 
       const red_flags = asArray<Record<string, unknown>>(obj.red_flags).map((f) => ({
         type: (typeof f.type === "string" ? f.type : "other") as PhishReport["red_flags"][0]["type"],
@@ -70,8 +75,8 @@ export function parsePhishReport(text: string): PhishReport | null {
       }));
 
       return {
-        label,
-        score,
+        label: aligned.label,
+        score: aligned.score,
         summary: String(obj.summary ?? "").trim() || emptyReport().summary,
         red_flags,
         evidence,
@@ -95,14 +100,16 @@ export function fallbackReportFromText(text: string): PhishReport {
   if (/\bhigh\s*risk\b/.test(lower) || /\bphishing\b/.test(lower)) {
     score = 80;
     label = "High Risk";
-  } else if (/\bsafe\b/.test(lower) && !/\bnot safe\b/.test(lower)) {
+  } else if (/\bsafe\b/.test(lower) && !/\bnot safe\b/.test(lower) && !/\bunsafe\b/.test(lower)) {
     score = 20;
     label = "Safe";
   }
 
+  const aligned = alignLabelAndScore(label, score);
+
   return emptyReport({
-    label,
-    score,
+    label: aligned.label,
+    score: aligned.score,
     summary: text.slice(0, 400).trim() || emptyReport().summary,
     evidence: [{ source: "email", detail: "Agent did not return structured JSON; showing text fallback." }],
   });
