@@ -326,10 +326,6 @@ Paste the full email — headers and body.`,
                 </p>
               </div>
               <div className="topbar-actions">
-                <span className="meta-pill">
-                  <span className="dot" />
-                  Never stored
-                </span>
                 {!enableWeb && view === "analyze" && (
                   <span className="meta-pill warn-pill">Web off</span>
                 )}
@@ -435,7 +431,7 @@ Paste the full email — headers and body.`,
                           {reviewMode ? "Message review" : "Message to analyze"}
                         </h3>
                         <span className="card-hint">
-                          {reviewMode ? "Highlighted · read-only" : "Headers + body · never stored"}
+                          {reviewMode ? "Highlighted · read-only" : "Headers + body"}
                         </span>
                       </div>
 

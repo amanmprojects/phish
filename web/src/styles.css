@@ -1128,7 +1128,8 @@ a {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  animation: fade-up 0.3s var(--ease) both;
+  /* Opacity-only entrance — avoid transform so child .spinner can rotate freely */
+  animation: fade-in-step 0.3s var(--ease) both;
 }
 
 .tool-step.status {
@@ -1211,6 +1212,15 @@ a {
   border-top-color: #e2e8f0;
   width: 12px;
   height: 12px;
+}
+
+@keyframes fade-in-step {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Dark contrast cards (like File Preview / Team in the mock) */
@@ -2023,12 +2033,15 @@ a {
 /* ── Spinner ── */
 .spinner {
   display: inline-block;
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.25);
   border-top-color: currentColor;
   border-radius: 50%;
+  /* Independent rotate property so parent transform animations cannot freeze it */
   animation: spin 0.7s linear infinite;
+  will-change: transform;
 }
 
 .btn-secondary .spinner,
@@ -2038,6 +2051,9 @@ a {
 }
 
 @keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
@@ -2074,6 +2090,26 @@ a {
 
   .bg-orb {
     animation: none;
+  }
+
+  /*
+   * Keep essential progress indicators moving. The blanket rule above freezes
+   * infinite loaders, which makes "agent is working" look stuck.
+   */
+  .spinner {
+    animation: spin 0.7s linear infinite !important;
+  }
+
+  .live-dot,
+  .card-title .icon.live,
+  .timeline-item.live .rail-dot {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .skeleton {
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

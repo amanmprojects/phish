@@ -123,6 +123,10 @@ export async function runDeepAnalyze(
         }
         if (!data) continue;
 
+        // High-frequency token stream — skip entirely when unused so the UI thread
+        // (and CSS spinner animations) stay responsive during agent work.
+        if (eventType === "text" && !handlers.onText) continue;
+
         let payload: Record<string, unknown>;
         try {
           payload = JSON.parse(data);

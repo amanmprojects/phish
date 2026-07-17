@@ -97,7 +97,7 @@ export function InvestigationCard({
                 if (item.kind === "status") {
                   return (
                     <li
-                      key={`s-${i}`}
+                      key={`status-${item.phase}-${item.at}`}
                       className="tool-step status"
                       style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
                     >
@@ -109,7 +109,7 @@ export function InvestigationCard({
                 if (item.kind !== "tool") return null;
                 return (
                   <li
-                    key={item.toolCallId ?? `t-${i}`}
+                    key={item.toolCallId ?? `tool-${item.toolName}-${item.at}`}
                     className={`tool-step ${item.status}`}
                     style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
                   >
@@ -120,7 +120,7 @@ export function InvestigationCard({
                     <span className={`tool-status ${item.status}`}>
                       {item.status === "running" ? (
                         <>
-                          <span className="spinner" />
+                          <span className="spinner" aria-hidden />
                           Running
                         </>
                       ) : (
@@ -131,11 +131,11 @@ export function InvestigationCard({
                 );
               })}
             {investigating && !timeline.some((t) => t.kind === "tool" && t.status === "running") && (
-              <li className="tool-step running">
+              <li key="agent-working" className="tool-step running">
                 <span className="tool-badge">Agent</span>
                 <span className="tool-query muted">Analyzing results…</span>
                 <span className="tool-status running">
-                  <span className="spinner" />
+                  <span className="spinner" aria-hidden />
                   Working
                 </span>
               </li>
