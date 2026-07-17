@@ -19,14 +19,11 @@ export function ReportCard({
   const flagItemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
   const reportRef = useRef<HTMLElement | null>(null);
 
+  /** Stable order — never reorder under the cursor (hover thrash). */
   const orderedRedFlags = useMemo(() => {
     if (!report.red_flags?.length) return [] as Array<{ flag: RedFlag; index: number }>;
-    const items = report.red_flags.map((flag, index) => ({ flag, index }));
-    if (focusedFlagIndex == null) return items;
-    const focused = items.filter((x) => x.index === focusedFlagIndex);
-    const rest = items.filter((x) => x.index !== focusedFlagIndex);
-    return [...focused, ...rest];
-  }, [report, focusedFlagIndex]);
+    return report.red_flags.map((flag, index) => ({ flag, index }));
+  }, [report]);
 
   const disagreement =
     quick && labelRank(quick.label) !== labelRank(report.label)
@@ -134,7 +131,10 @@ export function ReportCard({
                   Red flags
                   <span className="section-count">{orderedRedFlags.length}</span>
                 </div>
-                <ul className={`flag-list${focusedFlagIndex != null ? " is-focusing" : ""}`}>
+                <ul
+                  className={`flag-list${focusedFlagIndex != null ? " is-focusing" : ""}`}
+                  onMouseLeave={() => onFocusFlag(null)}
+                >
                   {orderedRedFlags.map(({ flag: f, index: i }) => (
                     <li
                       key={i}
@@ -144,7 +144,6 @@ export function ReportCard({
                       }}
                       className={`flag-item sev-border-${f.severity}${focusedFlagIndex === i ? " flag-focused" : ""}`}
                       onMouseEnter={() => setFocus(i)}
-                      onMouseLeave={() => onFocusFlag(null)}
                       onFocus={() => setFocus(i)}
                       onBlur={() => onFocusFlag(null)}
                       tabIndex={0}

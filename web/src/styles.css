@@ -907,11 +907,10 @@ a {
 .flag-list.is-focusing .flag-item:not(.flag-focused) {
   opacity: 0.42;
   filter: grayscale(0.15);
-  transform: scale(0.99);
+  /* Avoid scale/transform here — layout shifts under the cursor cause hover thrash */
   transition:
     opacity 0.18s var(--ease),
-    filter 0.18s var(--ease),
-    transform 0.18s var(--ease);
+    filter 0.18s var(--ease);
 }
 
 .samples-row {
